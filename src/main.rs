@@ -6,35 +6,18 @@ use sfml::{graphics::*, system::*, window::*};
 use glam::DVec2;
 use world::SubWorld;
 
+mod collision;
+mod components;
+mod systems;
+
+use systems as sys;
+
+use components::*;
+
 const GRAVITY: f64 = 100.0;
+
+/// space wasted by window decorations (approximate value)
 const WINDOW_PADDING: u32 = 10;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Mass(f64);
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Position(DVec2);
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Velocity(DVec2);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct Id(usize);
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Disabled;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct MouseTracker {
-    pos: DVec2,
-    radius: f64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct ShapeInfo {
-    radius: f64,
-    color: Color,
-}
 
 fn main() {
     let mut world = World::default();
@@ -65,12 +48,11 @@ fn main() {
 
     let mut resources = Resources::default();
     let mut schedule = Schedule::builder()
-        .add_system(handle_collisions_system())
-        .add_system(handle_mouse_collision_system())
+        .add_system(sys::handle_collisions_system())
+        .add_system(sys::handle_mouse_collision_system())
         .flush()
-        .add_system(update_positions_system())
-        // .add_system(update_velocity_system())
-        .add_system(check_wall_collision_system())
+        .add_system(sys::update_positions_system())
+        .add_system(sys::check_wall_collision_system())
         .build();
 
     // effective radius: radius + outline thickness
@@ -137,8 +119,10 @@ fn main() {
                     ..
                 } => {
                     world.entry(tracker_entity).unwrap().add_component(Disabled);
-                    <&mut MouseTracker>::query()
-                        .for_each_mut(&mut world, |mt| mt.pos = DVec2::new(-100., -100.));
+                    <&mut MouseTracker>::query().for_each_mut(&mut world, |mt| {
+                        mt.pos = DVec2::new(-100., -100.);
+                        resources.insert(*mt);
+                    });
                 }
 
                 Event::MouseButtonPressed {
@@ -220,112 +204,6 @@ fn main() {
 
         window.draw(&info_text);
         window.display();
-    }
-}
-
-#[system(for_each)]
-fn update_positions(pos: &mut Position, vel: &Velocity, #[resource] dt: &f32) {
-    let dt = *dt as f64;
-
-    pos.0.x += vel.0.x * dt;
-    pos.0.y += vel.0.y * dt;
-}
-
-#[system]
-fn handle_mouse_collision(
-    world: &mut SubWorld,
-    query: &mut Query<(&mut Position, &mut Velocity, &ShapeInfo)>,
-    #[resource] MouseTracker { radius, pos }: &MouseTracker,
-) {
-    query.for_each_mut(world, |(pos1, vel, shape)| {
-        let distance = (pos - pos1.0).length();
-        let combined_radius = radius + shape.radius;
-
-        if distance < combined_radius {
-            let overlap = combined_radius - distance;
-            let normal = (pos - pos1.0).normalize();
-            let correction = normal * overlap / 2.0;
-
-            *vel = Velocity(vel.0 - 2.0 * vel.0.dot(normal) * normal);
-            pos1.0 -= correction
-        }
-    });
-}
-
-#[system]
-fn handle_collisions(
-    world: &mut SubWorld,
-    query: &mut Query<(&Id, &Mass, &mut Position, &mut Velocity, &ShapeInfo)>,
-) {
-    let entities = query.iter_mut(world).collect::<Vec<_>>();
-    let mut updated = [None; 10000];
-
-    // Check collisions for all pairs
-    for i in 0..entities.len() {
-        for j in (i + 1)..entities.len() {
-            let (id1, mass1, pos1, vel1, shape1) = &entities[i];
-            let (id2, mass2, pos2, vel2, shape2) = &entities[j];
-
-            // Calculate distance and combined radius
-            let distance = (pos1.0 - pos2.0).length();
-            let combined_radius = shape1.radius + shape2.radius;
-
-            if distance < combined_radius {
-                // Collision detected, process velocities
-                let (new_vel1, new_vel2) =
-                    process_collision(vel1.0, vel2.0, pos1.0, pos2.0, mass1.0, mass2.0);
-
-                let overlap = combined_radius - distance;
-                let direction = (pos1.0 - pos2.0).normalize();
-                let correction = direction * overlap / 2.0;
-
-                let mut pos1 = **pos1;
-                let mut pos2 = **pos2;
-
-                // Move the particles apart
-                pos1.0 += correction;
-                pos2.0 -= correction;
-
-                updated[id1.0] = Some((new_vel1, pos1));
-                updated[id2.0] = Some((new_vel2, pos2));
-            }
-        }
-    }
-
-    query.iter_mut(world).for_each(|(id, _, pos, vel, _)| {
-        if let Some((new_vel, new_pos)) = updated[id.0] {
-            *vel = Velocity(new_vel);
-            *pos = new_pos;
-        }
-    });
-}
-
-#[system(for_each)]
-fn update_velocity(vel: &mut Velocity, #[resource] dt: &f32) {
-    vel.0.y += GRAVITY * *dt as f64;
-}
-
-#[system(for_each)]
-fn check_wall_collision(
-    pos: &mut Position,
-    vel: &mut Velocity,
-    ShapeInfo { radius, .. }: &ShapeInfo,
-    #[resource] size: &Vector2u,
-) {
-    if pos.0.x < 0.0 {
-        vel.0.x *= -1.0;
-        pos.0.x = 0.0;
-    } else if pos.0.x + radius >= (size.x - WINDOW_PADDING) as f64 {
-        vel.0.x *= -1.0;
-        pos.0.x = (size.x - WINDOW_PADDING) as f64 - radius;
-    }
-
-    if pos.0.y < 0.0 {
-        vel.0.y *= -1.0;
-        pos.0.y = 0.0;
-    } else if pos.0.y + radius >= (size.y - WINDOW_PADDING) as f64 {
-        vel.0.y *= -1.0;
-        pos.0.y = (size.y - WINDOW_PADDING) as f64 - radius;
     }
 }
 
