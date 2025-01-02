@@ -1,4 +1,12 @@
+#![allow(unused)]
+
+use std::time::Instant;
+
+use egui_sfml::SfEgui;
+use egui_sfml::egui;
+
 use legion::*;
+use quadtree::QuadTree;
 use rand::Rng;
 use rand::thread_rng;
 use sfml::{graphics::*, system::*, window::*};
@@ -8,43 +16,35 @@ use world::SubWorld;
 
 mod collision;
 mod components;
+mod quadtree;
 mod systems;
 
 use systems as sys;
 
 use components::*;
 
-const GRAVITY: f64 = 100.0;
+const GRAVITY: f64 = 10.0;
+// const E: f64 = 0.7; // Coefficient  of restitution
 
 /// space wasted by window decorations (approximate value)
-const WINDOW_PADDING: u32 = 10;
+const WINDOW_PADDING: u32 = 0;
+const WINDOW_HEIGHT: u32 = 900;
+const WINDOW_WIDHT: u32 = 1600;
 
 fn main() {
     let mut world = World::default();
     let mut window = RenderWindow::new(
-        (800, 800),
+        (WINDOW_WIDHT, WINDOW_HEIGHT),
         "Particle Simulator",
         Style::CLOSE,
         &ContextSettings {
-            antialiasing_level: 2,
+            // antialiasing_level: 2,
             ..Default::default()
         },
     )
     .unwrap();
 
-    let mut info_text = {
-        let mut font: Box<sfml::cpp::FBox<Font>> =
-            Box::new(Font::from_file("Hack NF.ttf").unwrap());
-        font.set_smooth(true);
-        let mut text = Text::default();
-        text.set_string("");
-        text.set_font(Box::leak(font));
-        text.set_character_size(20);
-        text
-    };
-
-    info_text.set_position((10.0, 10.0));
-    info_text.set_fill_color(Color::WHITE);
+    let mut sfegui = SfEgui::new(&window);
 
     let mut resources = Resources::default();
     let mut schedule = Schedule::builder()
@@ -66,8 +66,6 @@ fn main() {
     resources.insert(window.size());
     resources.insert(mt);
 
-    let mut shape = CircleShape::new(0.0, 10);
-
     let mut mouse_tracker = CircleShape::new(0.0, 1000);
     mouse_tracker.set_origin((50.0, 50.0));
     mouse_tracker.set_radius(50.0);
@@ -80,18 +78,32 @@ fn main() {
     let mut pressed = false;
     let mut num_particles = 0;
 
-    let add_ball = |x, y, world: &mut World, num_particles: &mut u32| {
+    // used in egui
+    let mut slower_collision_detection = false;
+    let mut draw_quadtree = false;
+    let mut quad_capacity = 8;
+    let mut point_count = 30;
+    let mut fps_limited = false;
+    let mut fps_limit = 120;
+    let mut particle_radius = 5.0;
+    //
+
+    let mut shape = CircleShape::new(0.0, point_count);
+
+    let add_ball = |x, y, world: &mut World, num_particles: &mut u32, particle_radius: f64| {
         *num_particles += 1;
         let _ = world.push((
             Id(id()),
-            Mass(50.0),
+            // Mass(thread_rng().gen_range(50.0..=100.0)),
+            Mass(1.0),
             Position(DVec2 { x, y }),
             Velocity(DVec2 {
-                x: thread_rng().gen_range(-50.0..=50.0),
-                y: thread_rng().gen_range(-50.0..=50.0),
+                x: thread_rng().gen_range(-30.0..=30.0),
+                y: thread_rng().gen_range(-30.0..=30.0),
             }),
             ShapeInfo {
-                radius: thread_rng().gen_range(5.0..=10.0),
+                radius: particle_radius,
+                // radius: 100.0,
                 color: Color::rgb(
                     thread_rng().gen_range(0..=255),
                     thread_rng().gen_range(0..=255),
@@ -102,21 +114,24 @@ fn main() {
     };
 
     while window.is_open() {
+        if fps_limited {
+            window.set_framerate_limit(fps_limit);
+        }
+
         let dt = clock.restart();
         while let Some(event) = window.poll_event() {
-            #[allow(clippy::single_match)]
+            sfegui.add_event(&event);
             match event {
                 Event::Closed => window.close(),
                 Event::Resized { .. } => resources.insert(window.size()),
 
                 Event::MouseButtonReleased {
-                    button: mouse::Button::Left,
+                    button: mouse::Button::Right,
                     ..
                 } => pressed = false,
 
-                Event::MouseButtonReleased {
-                    button: mouse::Button::Right,
-                    ..
+                Event::KeyReleased {
+                    code: Key::Space, ..
                 } => {
                     world.entry(tracker_entity).unwrap().add_component(Disabled);
                     <&mut MouseTracker>::query().for_each_mut(&mut world, |mt| {
@@ -125,25 +140,24 @@ fn main() {
                     });
                 }
 
-                Event::MouseButtonPressed {
-                    button: mouse::Button::Right,
-                    ..
+                Event::KeyPressed {
+                    code: Key::Space, ..
                 } => world
                     .entry(tracker_entity)
                     .unwrap()
                     .remove_component::<Disabled>(),
 
                 Event::MouseButtonPressed {
-                    button: mouse::Button::Left,
+                    button: mouse::Button::Right,
                     x,
                     y,
                 } => {
                     pressed = true;
-                    add_ball(x as _, y as _, &mut world, &mut num_particles);
+                    add_ball(x as _, y as _, &mut world, &mut num_particles, particle_radius);
                 }
 
                 Event::MouseMoved { x, y } if pressed => {
-                    add_ball(x as _, y as _, &mut world, &mut num_particles);
+                    add_ball(x as _, y as _, &mut world, &mut num_particles, particle_radius);
                     <&mut MouseTracker>::query()
                         .filter(!component::<Disabled>())
                         .for_each_mut(&mut world, |m| {
@@ -171,19 +185,45 @@ fn main() {
             }
         }
 
-        resources.insert(dt.as_seconds());
-        schedule.execute(&mut world, &mut resources);
+        let timer = Instant::now();
+        let mut query = <(&Id, &Position, &ShapeInfo)>::query();
+        let mut qt = quadtree::QuadTree::<usize>::new(quad_capacity, Rect {
+            left: 0.,
+            top: 0.,
+            width: window.size().x as _,
+            height: window.size().y as _,
+        });
 
-        let fps = 1.0 / dt.as_seconds();
-        info_text.set_string(&format!("FPS: {:.0}\nParticles: {num_particles}", fps));
+        query.for_each(
+            &world,
+            |(Id(id), Position(position), ShapeInfo { radius, .. })| {
+                qt.push((*position, *radius, *id));
+            },
+        );
+
+        let build_time = timer.elapsed().as_millis();
 
         window.clear(Color::BLACK);
 
+        if draw_quadtree {
+            qt.draw(&mut window, 0);
+        }
+
+        resources.insert(qt);
+        resources.insert(slower_collision_detection);
+        resources.insert(dt.as_seconds());
+
+        schedule.execute(&mut world, &mut resources);
+
+        let fps = (1.0 / dt.as_seconds()) as u32;
+
         <(&Position, &ShapeInfo)>::query().iter(&world).for_each(
             |(Position(DVec2 { x, y }), ShapeInfo { radius, color })| {
+                shape.set_point_count(point_count);
                 shape.set_position((*x as _, *y as _));
                 shape.set_fill_color(*color);
                 shape.set_radius(*radius as _);
+                shape.set_origin((*radius as _, *radius as _));
 
                 window.draw(&shape);
             },
@@ -202,7 +242,58 @@ fn main() {
                 },
             );
 
-        window.draw(&info_text);
+        let di = sfegui
+            .run(&mut window, |_rw, ctx| {
+                egui::Window::new("Settings")
+                    .default_pos((10.0, 10.0))
+                    .collapsible(true)
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        ui.label(format!("FPS: {}", fps));
+                        ui.label(format!("Particles: {num_particles}"));
+                        ui.label(format!("Quadtree time: {build_time}ms"));
+                        ui.separator();
+                        ui.checkbox(
+                            &mut slower_collision_detection,
+                            "Use slower collision detection",
+                        );
+
+                        if slower_collision_detection {
+                            draw_quadtree = false;
+                        }
+
+                        ui.add_enabled(
+                            !slower_collision_detection,
+                            egui::Checkbox::new(&mut draw_quadtree, "Draw quadtree"),
+                        );
+
+                        ui.separator();
+
+                        ui.add_enabled(
+                            !slower_collision_detection,
+                            egui::Slider::new(&mut quad_capacity, 4..=64).text("Quad capacity"),
+                        );
+
+                        ui.add(egui::Slider::new(&mut point_count, 1..=100).text("Point count"));
+                        ui.add(egui::Slider::new(&mut particle_radius, 1.0..=100.0).text("Point radius"));
+
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut fps_limited, "Limit FPS");
+                            ui.add_enabled(fps_limited, egui::Slider::new(&mut fps_limit, 1..=1000))
+                        });
+
+                        ui.separator();
+
+                        if ui.button("Reset Canvas").clicked() {
+                            world.clear();
+                            num_particles = 0;
+                        }
+                    });
+            })
+            .unwrap();
+
+        sfegui.draw(di, &mut window, None);
+
         window.display();
     }
 }
