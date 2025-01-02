@@ -1,4 +1,4 @@
 # Particle Simulator
 
-## Video
-![video](demo.mp4)
+## Screenshot
+![screenshot](screenshot.png)
