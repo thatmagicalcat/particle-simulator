@@ -153,11 +153,23 @@ fn main() {
                     y,
                 } => {
                     pressed = true;
-                    add_ball(x as _, y as _, &mut world, &mut num_particles, particle_radius);
+                    add_ball(
+                        x as _,
+                        y as _,
+                        &mut world,
+                        &mut num_particles,
+                        particle_radius,
+                    );
                 }
 
                 Event::MouseMoved { x, y } if pressed => {
-                    add_ball(x as _, y as _, &mut world, &mut num_particles, particle_radius);
+                    add_ball(
+                        x as _,
+                        y as _,
+                        &mut world,
+                        &mut num_particles,
+                        particle_radius,
+                    );
                     <&mut MouseTracker>::query()
                         .filter(!component::<Disabled>())
                         .for_each_mut(&mut world, |m| {
@@ -201,7 +213,7 @@ fn main() {
             },
         );
 
-        let build_time = timer.elapsed().as_millis();
+        let qt_build_time = timer.elapsed().as_nanos() as f64 / 1e6;
 
         window.clear(Color::BLACK);
 
@@ -217,6 +229,7 @@ fn main() {
 
         let fps = (1.0 / dt.as_seconds()) as u32;
 
+        let timer = Instant::now();
         <(&Position, &ShapeInfo)>::query().iter(&world).for_each(
             |(Position(DVec2 { x, y }), ShapeInfo { radius, color })| {
                 shape.set_point_count(point_count);
@@ -228,6 +241,8 @@ fn main() {
                 window.draw(&shape);
             },
         );
+
+        let draw_time = timer.elapsed().as_nanos() as f64 / 1e6;
 
         <&MouseTracker>::query()
             .filter(!component::<Disabled>())
@@ -251,7 +266,8 @@ fn main() {
                     .show(ctx, |ui| {
                         ui.label(format!("FPS: {}", fps));
                         ui.label(format!("Particles: {num_particles}"));
-                        ui.label(format!("Quadtree time: {build_time}ms"));
+                        ui.label(format!("Quadtree time: {qt_build_time:.2}ms"));
+                        ui.label(format!("Draw time: {draw_time:.2}ms"));
                         ui.separator();
                         ui.checkbox(
                             &mut slower_collision_detection,
@@ -275,19 +291,15 @@ fn main() {
                         );
 
                         ui.add(egui::Slider::new(&mut point_count, 1..=100).text("Point count"));
-                        ui.add(egui::Slider::new(&mut particle_radius, 1.0..=100.0).text("Point radius"));
+                        ui.add(
+                            egui::Slider::new(&mut particle_radius, 1.0..=100.0)
+                                .text("Point radius"),
+                        );
 
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut fps_limited, "Limit FPS");
                             ui.add_enabled(fps_limited, egui::Slider::new(&mut fps_limit, 1..=1000))
                         });
-
-                        ui.separator();
-
-                        if ui.button("Reset Canvas").clicked() {
-                            world.clear();
-                            num_particles = 0;
-                        }
                     });
             })
             .unwrap();
