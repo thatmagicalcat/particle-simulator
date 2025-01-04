@@ -1,4 +1,4 @@
-use super::*;
+use glam::DVec2;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Mass(pub f64);
@@ -24,6 +24,6 @@ pub struct MouseTracker {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ShapeInfo {
     pub radius: f64,
-    pub color: Color,
+    pub color: sfml::graphics::Color,
 }
 

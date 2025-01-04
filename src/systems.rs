@@ -1,8 +1,11 @@
-use std::collections::HashSet;
-
-use collision::find_overlapping_intervals_2d;
-
 use super::*;
+
+use components::*;
+use quadtree::*;
+use collision::*;
+
+use legion::world::SubWorld;
+use legion::*;
 
 #[system(for_each)]
 pub fn update_positions(pos: &mut Position, vel: &Velocity, #[resource] dt: &f32) {
@@ -161,7 +164,7 @@ pub fn check_wall_collision(
     pos: &mut Position,
     vel: &mut Velocity,
     ShapeInfo { radius, .. }: &ShapeInfo,
-    #[resource] size: &Vector2u,
+    #[resource] size: &sfml::system::Vector2u,
 ) {
     if pos.0.x - *radius < 0.0 {
         vel.0.x *= -1.0;

@@ -1,6 +1,5 @@
-use super::*;
-
-const QUADCAPACITY: usize = 16;
+use sfml::graphics::*;
+use glam::DVec2;
 
 /// Make sure not to put a big object as the generic
 /// type parameter since there's a lot of cloning.
@@ -22,6 +21,7 @@ impl<T: Clone> QuadTree<T> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.points.len()
             + self
@@ -37,8 +37,6 @@ impl<T: Clone> QuadTree<T> {
 
         rect.set_size(self.boundary.size().as_other());
         rect.set_position(self.boundary.position().as_other());
-
-        let color_value = (255.0 * (1.0 / depth as f32)).ceil() as u8;
 
         const MAX_DEPTH: usize = 10;
 
@@ -77,7 +75,7 @@ impl<T: Clone> QuadTree<T> {
                 .filter(|(i_circle_centre, i_radius, _)| {
                     cc_intersection(*i_circle_centre, *i_radius, circle_centre, circle_radius)
                 })
-                .map(|(pos, radius, data)| data),
+                .map(|(_, _, data)| data),
         );
 
         if let Some(children) = &self.children {
