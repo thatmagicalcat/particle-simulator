@@ -17,7 +17,9 @@ use super::systems as sys;
 use components::*;
 
 pub fn run() {
-    let textures = renderer::load_images("./res");
+    let texture_image = renderer::circle(100, Color::WHITE);
+    let mut texture = Texture::from_image(&texture_image, Rect::new(0, 0, 200, 200)).unwrap();
+    texture.set_smooth(true);
 
     let mut world = World::default();
     let mut window = RenderWindow::new(
@@ -77,6 +79,7 @@ pub fn run() {
 
     // let mut shape = CircleShape::new(5.0, 30);
     let mut shape = Sprite::new();
+    shape.set_texture(&texture, true);
 
     let add_ball = |x, y, world: &mut World, num_particles: &mut u32, particle_radius: f64| {
         *num_particles += 1;
@@ -92,12 +95,12 @@ pub fn run() {
             ShapeInfo {
                 radius: particle_radius,
                 // radius: 100.0,
-                color: Color::GREEN,
-                // color: Color::rgb(
-                // thread_rng().gen_range(0..=255),
-                // thread_rng().gen_range(0..=255),
-                // thread_rng().gen_range(0..=255),
-                // ),
+                // color: Color::GREEN,
+                color: Color::rgb(
+                thread_rng().gen_range(0..=255),
+                thread_rng().gen_range(0..=255),
+                thread_rng().gen_range(0..=255),
+                ),
             },
         ));
     };
@@ -223,16 +226,14 @@ pub fn run() {
         let timer = Instant::now();
         <(&Position, &ShapeInfo)>::query().iter(&world).for_each(
             |(Position(DVec2 { x, y }), ShapeInfo { radius, color })| {
-                let &Color { r, g, b, a } = color;
-                shape.set_texture(textures.get(&(*radius as i32, (r, g, b, a))).unwrap(), true);
-                let scale = (*radius / (*radius + renderer::RADIUS_INCREMENT as f64)) as f32;
+                let scale = *radius as f32 / 100.0;
                 shape.set_scale((scale, scale));
 
                 shape.set_position((*x as _, *y as _));
                 shape.set_color(*color);
 
                 // shape.set_point_count(point_count);
-                // shape.set_fill_color(*color);
+                shape.set_color(*color);
                 // shape.set_radius(*radius as _);
                 shape.set_origin((*radius as _, *radius as _));
 
