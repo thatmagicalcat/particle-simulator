@@ -27,3 +27,5 @@ pub struct ShapeInfo {
     pub color: sfml::graphics::Color,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CollisionDetectionTime(pub u128);

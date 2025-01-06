@@ -54,6 +54,7 @@ pub fn run() {
 
     resources.insert(window.size());
     resources.insert(mt);
+    resources.insert(CollisionDetectionTime(0));
 
     let mut mouse_tracker = CircleShape::new(0.0, 1000);
     mouse_tracker.set_origin((50.0, 50.0));
@@ -71,10 +72,10 @@ pub fn run() {
     let mut slower_collision_detection = false;
     let mut draw_quadtree = false;
     let mut quad_capacity = 8;
-    let mut point_count = 30;
     let mut fps_limited = false;
     let mut fps_limit = 120;
     let mut particle_radius = 5;
+    let mut show_info = false;
     //
 
     // let mut shape = CircleShape::new(5.0, 30);
@@ -97,9 +98,9 @@ pub fn run() {
                 // radius: 100.0,
                 // color: Color::GREEN,
                 color: Color::rgb(
-                thread_rng().gen_range(0..=255),
-                thread_rng().gen_range(0..=255),
-                thread_rng().gen_range(0..=255),
+                    thread_rng().gen_range(0..=255),
+                    thread_rng().gen_range(0..=255),
+                    thread_rng().gen_range(0..=255),
                 ),
             },
         ));
@@ -221,7 +222,7 @@ pub fn run() {
 
         schedule.execute(&mut world, &mut resources);
 
-        let fps = (1.0 / dt.as_seconds()) as u32;
+        let frame_time = dt.as_milliseconds();
 
         let timer = Instant::now();
         <(&Position, &ShapeInfo)>::query().iter(&world).for_each(
@@ -232,7 +233,6 @@ pub fn run() {
                 shape.set_position((*x as _, *y as _));
                 shape.set_color(*color);
 
-                // shape.set_point_count(point_count);
                 shape.set_color(*color);
                 // shape.set_radius(*radius as _);
                 shape.set_origin((*radius as _, *radius as _));
@@ -263,11 +263,6 @@ pub fn run() {
                     .collapsible(true)
                     .resizable(false)
                     .show(ctx, |ui| {
-                        ui.label(format!("FPS: {}", fps));
-                        ui.label(format!("Particles: {num_particles}"));
-                        ui.label(format!("Quadtree time: {qt_build_time:.2}ms"));
-                        ui.label(format!("Draw time: {draw_time:.2}ms"));
-                        ui.separator();
                         ui.checkbox(
                             &mut slower_collision_detection,
                             "Use slower collision detection",
@@ -282,6 +277,8 @@ pub fn run() {
                             egui::Checkbox::new(&mut draw_quadtree, "Draw quadtree"),
                         );
 
+                        ui.checkbox(&mut show_info, "Show internal info");
+
                         ui.separator();
 
                         ui.add_enabled(
@@ -289,7 +286,6 @@ pub fn run() {
                             egui::Slider::new(&mut quad_capacity, 4..=64).text("Quad capacity"),
                         );
 
-                        ui.add(egui::Slider::new(&mut point_count, 1..=100).text("Point count"));
                         ui.add(
                             egui::Slider::new(&mut particle_radius, 1..=10).text("Point radius"),
                         );
@@ -298,6 +294,24 @@ pub fn run() {
                             ui.checkbox(&mut fps_limited, "Limit FPS");
                             ui.add_enabled(fps_limited, egui::Slider::new(&mut fps_limit, 1..=1000))
                         });
+                    });
+
+                egui::Window::new("Info")
+                    .collapsible(true)
+                    .open(&mut show_info)
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        ui.label(format!("FPS: {:.0}", 1.0 / (frame_time as f32 / 1000.0)));
+                        ui.label(format!("Frame Time: {:.3}ms", frame_time));
+                        ui.label(format!("Draw time: {draw_time:.2}ms"));
+                        ui.separator();
+                        ui.label(format!(
+                            "Collision processing time: {:.2}ms",
+                            (resources.get::<CollisionDetectionTime>().unwrap().0 as f64 / 1e6),
+                        ));
+                        ui.label(format!("Quadtree time: {qt_build_time:.2}ms"));
+                        ui.separator();
+                        ui.label(format!("Particles: {num_particles}"));
                     });
             })
             .unwrap();

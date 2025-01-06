@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use super::*;
 
 use components::*;
@@ -42,7 +44,9 @@ pub fn handle_collisions(
     query: &mut Query<(&Id, &Mass, &mut Position, &mut Velocity, &ShapeInfo)>,
     #[resource] qt: &QuadTree<usize>,
     #[resource] slower_detection: &bool,
+    #[resource] time: &mut CollisionDetectionTime,
 ) {
+    let clock = Instant::now();
     if !*slower_detection {
         let mut entities = [const { None }; 20_000];
 
@@ -152,6 +156,8 @@ pub fn handle_collisions(
             }
         });
     }
+
+    time.0 = clock.elapsed().as_nanos();
 }
 
 #[system(for_each)]
